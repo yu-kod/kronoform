@@ -1,0 +1,29 @@
+# This rule is not used by the project kronoform itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants read-only access to history.yu-kod.github.io resources.
+# This role is intended for users who need visibility into these resources
+# without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: kronoform
+    app.kubernetes.io/managed-by: kustomize
+  name: kronoform-viewer-role
+rules:
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoforms
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoforms/status
+  verbs:
+  - get

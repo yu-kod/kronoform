@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+  - history_v1alpha1_kronoform.yaml
+  - configmap_example.yaml
+  - deployment_example.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kronoform-example
+  namespace: default
+  labels:
+    app.kubernetes.io/name: kronoform
+    app.kubernetes.io/managed-by: kronoform
+data:
+  message: "Hello from Kronoform example! Updated version!"
+  version: "v2.0"
+  description: "This is a sample ConfigMap for testing Kronoform history tracking"
+  timestamp: "2025-08-06T10:35:00Z"
+  new_field: "This field was added to test change detection"

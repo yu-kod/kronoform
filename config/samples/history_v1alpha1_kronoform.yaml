@@ -1,0 +1,9 @@
+apiVersion: history.yu-kod.github.io/v1alpha1
+kind: Kronoform
+metadata:
+  labels:
+    app.kubernetes.io/name: kronoform
+    app.kubernetes.io/managed-by: kustomize
+  name: kronoform-sample
+spec:
+  # TODO(user): Add fields here
