@@ -17,130 +17,150 @@ Kronoform - bringing "rewind-able" peace of mind to your cluster.
 ### Prerequisites
 
 - go version v1.24.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- kubectl version v1.11.3+
+- Access to a Kubernetes cluster with admin privileges (for CRD installation)
 
-### To Deploy on the cluster
+### Installation
 
-**Build and push your image to the location specified by `IMG`:**
-
-```sh
-make docker-build docker-push IMG=<some-registry>/kronoform:tag
-```
-
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
+**1. Install the Custom Resource Definitions (CRDs):**
 
 ```sh
 make install
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+**2. Build the kubectl plugin:**
 
 ```sh
-make deploy IMG=<some-registry>/kronoform:tag
-```
-
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-> privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
-```
-
-**Test the kubectl plugin with examples:**
-
-```sh
-# Build the plugin
 make build-plugin
+```
 
+**3. Install the plugin (optional - for system-wide usage):**
+
+```sh
+make install-plugin
+```
+
+This will copy the plugin to `/usr/local/bin/kubectl-kronoform` so you can use it as `kubectl kronoform` from anywhere.
+
+### Quick Start
+
+**Use kronoform instead of kubectl apply:**
+
+```sh
+# Instead of: kubectl apply -f your-manifest.yaml
+kubectl kronoform apply -f your-manifest.yaml
+```
+
+**Or use the binary directly:**
+
+```sh
+./bin/kubectl-kronoform apply -f your-manifest.yaml
+```
+
+**Test with example resources:**
+
+```sh
 # Test with ConfigMap example
-./bin/kubectl-kronoform apply -f config/samples/configmap_example.yaml
+kubectl kronoform apply -f config/samples/configmap_example.yaml
 
 # Test with Deployment example
-./bin/kubectl-kronoform apply -f config/samples/deployment_example.yaml
+kubectl kronoform apply -f config/samples/deployment_example.yaml
 
 # View the recorded history
 kubectl get kronoformhistories
 kubectl get kronoformsnapshots
+
+# Get detailed information
+kubectl describe kronoformhistory <history-name>
+kubectl describe kronoformsnapshot <snapshot-name>
 ```
 
-> **NOTE**: Ensure that the samples has default values to test it out.
+### Features
 
-### To Uninstall
+- **Intelligent Change Detection**: Only records history when actual changes occur (skips "unchanged" operations)
+- **User Tracking**: Records who applied each change
+- **Snapshot Management**: Creates snapshots before applying and links them to history records
+- **Namespace Support**: Works with resources in any namespace
+- **Dry-run Support**: Compatible with `--dry-run` flag
 
-**Delete the instances (CRs) from the cluster:**
+### How it works
 
-```sh
-kubectl delete -k config/samples/
-```
+1. When you run `kubectl kronoform apply`, it first creates a snapshot record
+2. Then executes the actual `kubectl apply` command
+3. Analyzes the kubectl output to detect if changes occurred
+4. Only creates a history record if actual changes were made
+5. If no changes occurred, cleans up the snapshot to avoid clutter
 
-**Delete the APIs(CRDs) from the cluster:**
+### Cleanup
+
+**Remove the CRDs and all recorded history:**
 
 ```sh
 make uninstall
 ```
 
-**UnDeploy the controller from the cluster:**
+**Uninstall the plugin:**
 
 ```sh
-make undeploy
+sudo rm /usr/local/bin/kubectl-kronoform
 ```
 
-## Project Distribution
+## Development
 
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
+### Building from source
 
 ```sh
-make build-installer IMG=<some-registry>/kronoform:tag
+# Build the plugin
+make build-plugin
+
+# Run tests
+make test
+
+# Generate CRDs
+make manifests
+
+# Install CRDs
+make install
 ```
 
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
+## Architecture
 
-2. Using the installer
+Kronoform consists of:
 
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
+- **kubectl plugin**: The main CLI tool that wraps `kubectl apply`
+- **Custom Resource Definitions (CRDs)**:
+  - `KronoformSnapshot`: Records the manifest and metadata before applying
+  - `KronoformHistory`: Records successful apply operations with user tracking
+  - `Kronoform`: Basic CRD for the project (currently minimal)
+
+## Distribution
+
+### Installing from GitHub Releases
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/kronoform/<tag or branch>/dist/install.yaml
+# Download the latest release for your platform
+curl -L https://github.com/yu-kod/kronoform/releases/latest/download/kubectl-kronoform-darwin-amd64 -o kubectl-kronoform
+
+# Make it executable
+chmod +x kubectl-kronoform
+
+# Move to PATH (optional)
+sudo mv kubectl-kronoform /usr/local/bin/
+
+# Install CRDs
+kubectl apply -f https://github.com/yu-kod/kronoform/releases/latest/download/install.yaml
 ```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v1-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-   can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
 
 ## Contributing
 
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+We welcome contributions! Please feel free to submit a Pull Request.
+
+### Development Setup
+
+1. Clone the repository
+2. Install dependencies: `go mod download`
+3. Build: `make build-plugin`
+4. Test: `make test`
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
