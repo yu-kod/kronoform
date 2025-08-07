@@ -1,0 +1,110 @@
+version: 2
+project_name: kronoform
+dist: dist/
+release:
+  skip_upload: false
+  extra_files:
+    - glob: ./config/crd/bases/*.yaml
+builds:
+  - id: kubectl-kronoform
+    env:
+      - CGO_ENABLED=0
+    main: ./cmd/kubectl-kronoform
+    binary: kubectl-kronoform
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+  - id: manager
+    env:
+      - CGO_ENABLED=0
+    main: ./cmd/main.go
+    binary: manager
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+before:
+  hooks:
+    - go mod tidy
+    - make manifests
+    - make generate
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - config/samples/*
+dockers:
+  - image_templates:
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-amd64"
+    use: buildx
+    dockerfile: ./Dockerfile
+    ids:
+      - manager
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd/
+      - api/
+      - internal/
+      - LICENSE
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source=https://github.com/yu-kod/kronoform"
+  - image_templates:
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-arm64"
+    use: buildx
+    dockerfile: ./Dockerfile
+    ids:
+      - manager
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd/
+      - api/
+      - internal/
+      - LICENSE
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source=https://github.com/yu-kod/kronoform"
+docker_manifests:
+  - name_template: "ghcr.io/yu-kod/kronoform:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-amd64"
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/yu-kod/kronoform:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-amd64"
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/yu-kod/kronoform:latest"
+    image_templates:
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-amd64"
+      - "ghcr.io/yu-kod/kronoform:{{ .Version }}-arm64"
+checksum:
+  name_template: "checksums.txt"
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
