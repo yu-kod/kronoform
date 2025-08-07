@@ -25,7 +25,7 @@ jobs:
       - name: Set previous release tag for GoReleaser
         run: |
           # Helm Chart の最新版ではなく、本体の最新版のタグを取得する
-          export TAG=$(curl -s "https://api.github.com/repos/zoetrope/website-operator/releases/latest" | jq -r .tag_name)
+          export TAG=$(curl -s "https://api.github.com/repos/yu-kod/kronoform/releases/latest" | jq -r .tag_name)
           echo "GORELEASER_PREVIOUS_TAG=${TAG}" >> $GITHUB_ENV
       - name: GoReleaser
         uses: goreleaser/goreleaser-action@v6
