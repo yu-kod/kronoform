@@ -68,6 +68,18 @@ type KronoformHistorySpec struct {
 	// AppliedBy indicates who/what applied the manifests
 	// +optional
 	AppliedBy string `json:"appliedBy,omitempty"`
+
+	// ResourceTypes contains the list of resource types affected (e.g., ["ConfigMap", "Deployment"])
+	// +optional
+	ResourceTypes []string `json:"resourceTypes,omitempty"`
+
+	// ResourceNames contains the list of resource names affected (e.g., ["my-configmap", "my-deployment"])
+	// +optional
+	ResourceNames []string `json:"resourceNames,omitempty"`
+
+	// ResourceNamespaces contains the list of namespaces affected
+	// +optional
+	ResourceNamespaces []string `json:"resourceNamespaces,omitempty"`
 }
 
 // KronoformHistoryStatus defines the observed state of KronoformHistory
@@ -90,6 +102,7 @@ type KronoformHistoryStatus struct {
 // +kubebuilder:printcolumn:name="Snapshot",type="string",JSONPath=".spec.snapshotRef"
 // +kubebuilder:printcolumn:name="Description",type="string",JSONPath=".spec.description"
 // +kubebuilder:printcolumn:name="Applied By",type="string",JSONPath=".spec.appliedBy"
+// +kubebuilder:printcolumn:name="Resource Types",type="string",JSONPath=".spec.resourceTypes"
 // +kubebuilder:printcolumn:name="Applied At",type="date",JSONPath=".status.appliedAt"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
