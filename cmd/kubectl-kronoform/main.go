@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -62,7 +63,19 @@ This command combines kubectl apply with automatic history tracking.`,
 	applyCmd.Flags().Bool("dry-run", false, "If true, only print the object that would be sent, without sending it")
 	applyCmd.Flags().StringP("namespace", "n", "", "If present, the namespace scope for this CLI request")
 
+	var diffCmd = &cobra.Command{
+		Use:   "diff <history-id>",
+		Short: "Show diff between before and after applying a change",
+		Long: `Show the difference between the manifest before and after applying a change.
+This helps you understand what exactly changed in your resources.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDiff(cmd, args)
+		},
+	}
+
 	rootCmd.AddCommand(applyCmd)
+	rootCmd.AddCommand(diffCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -372,4 +385,62 @@ func cleanupSnapshot(k8sClient client.Client, snapshotName string, namespace str
 	} else {
 		fmt.Printf("[%s] Kronoform: Cleaned up unused snapshot: %s\n", time.Now().Format("15:04:05"), snapshotName)
 	}
+}
+
+func runDiff(cmd *cobra.Command, args []string) error {
+	fmt.Printf("[%s] Kronoform: Starting diff operation...\n", time.Now().Format("15:04:05"))
+
+	historyID := args[0]
+
+	// Create Kubernetes client
+	k8sClient, err := createK8sClient()
+	if err != nil {
+		return fmt.Errorf("failed to create k8s client: %w", err)
+	}
+
+	// Get history
+	history, err := getHistory(k8sClient, historyID)
+	if err != nil {
+		return fmt.Errorf("failed to get history: %w", err)
+	}
+
+	// Get snapshot
+	snapshot, err := getSnapshot(k8sClient, history.Spec.SnapshotRef)
+	if err != nil {
+		return fmt.Errorf("failed to get snapshot: %w", err)
+	}
+
+	// Show diff
+	return showDiff(snapshot.Spec.Manifests, history.Spec.Manifests)
+}
+
+func getHistory(k8sClient client.Client, historyID string) (*historyv1alpha1.KronoformHistory, error) {
+	history := &historyv1alpha1.KronoformHistory{}
+	err := k8sClient.Get(context.TODO(), client.ObjectKey{
+		Name: historyID,
+	}, history)
+	if err != nil {
+		return nil, err
+	}
+	return history, nil
+}
+
+func getSnapshot(k8sClient client.Client, snapshotName string) (*historyv1alpha1.KronoformSnapshot, error) {
+	snapshot := &historyv1alpha1.KronoformSnapshot{}
+	err := k8sClient.Get(context.TODO(), client.ObjectKey{
+		Name: snapshotName,
+	}, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func showDiff(before, after string) error {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(before, after, false)
+
+	fmt.Println("Diff between before and after:")
+	fmt.Println(dmp.DiffPrettyText(diffs))
+	return nil
 }

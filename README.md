@@ -57,6 +57,14 @@ kubectl kronoform apply -f your-manifest.yaml
 ./bin/kubectl-kronoform apply -f your-manifest.yaml
 ```
 
+**View diffs between changes:**
+
+```sh
+kubectl kronoform diff <history-id>
+```
+
+This shows the differences between the manifest before and after applying changes.
+
 **Test with example resources:**
 
 ```sh
@@ -74,6 +82,31 @@ kubectl get kronoformsnapshots
 kubectl describe kronoformhistory <history-name>
 kubectl describe kronoformsnapshot <snapshot-name>
 ```
+
+### Using kubectl apply directly (via alias)
+
+To make it even easier to use kronoform, you can set up a shell function so that `kubectl apply` automatically uses kronoform while keeping other kubectl commands unchanged:
+
+**Set up a shell function (recommended):**
+
+Add this to your shell profile (e.g., `~/.bashrc`, `~/.zshrc`):
+
+```sh
+function kubectl() {
+    if [[ $1 == "apply" ]]; then
+        shift
+        command kubectl kronoform apply "$@"
+    else
+        command kubectl "$@"
+    fi
+}
+```
+
+Then reload your shell or run `source ~/.zshrc`.
+
+Now, `kubectl apply -f your-manifest.yaml` will automatically use kronoform to record history, while other commands like `kubectl get` work normally.
+
+**Note:** This overrides `kubectl apply` in your shell session. If you need the original `kubectl apply`, you can use `command kubectl apply` directly.
 
 ### Features
 
