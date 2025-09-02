@@ -1,4 +1,4 @@
-version: 2
+version: "2"
 run:
   allow-parallel-runners: true
   timeout: 5m
@@ -13,8 +13,3 @@ linters:
     - misspell
     - gosec
     - gocritic
-issues:
-  exclude-rules:
-    - linters:
-        - dupl
-      path: _test\.go
