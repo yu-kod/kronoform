@@ -18,7 +18,9 @@ func TestRunDiff(t *testing.T) {
 
 	// Create fake client
 	scheme := runtime.NewScheme()
-	historyv1alpha1.AddToScheme(scheme)
+	if err := historyv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("Failed to add scheme: %v", err)
+	}
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
@@ -81,11 +83,17 @@ func TestReadManifestFiles(t *testing.T) {
 	content := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\ndata:\n  key: value"
 	tmpFile, err := os.CreateTemp("", "test-manifest-*.yaml")
 	g.Expect(err).To(gomega.BeNil())
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		if removeErr := os.Remove(tmpFile.Name()); removeErr != nil {
+			t.Logf("Warning: failed to remove temp file: %v", removeErr)
+		}
+	}()
 
 	_, err = tmpFile.WriteString(content)
 	g.Expect(err).To(gomega.BeNil())
-	tmpFile.Close()
+	if closeErr := tmpFile.Close(); closeErr != nil {
+		t.Logf("Warning: failed to close temp file: %v", closeErr)
+	}
 
 	// Test readManifestFiles
 	result, err := readManifestFiles([]string{tmpFile.Name()})

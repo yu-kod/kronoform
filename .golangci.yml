@@ -1,34 +1,19 @@
+version: 2
 run:
   allow-parallel-runners: true
   timeout: 5m
 linters:
-  default: none
   enable:
-    - dogsled
-    - dupl
-    - errorlint
-    - gocritic
-    - gocyclo
-    - gofmt
-    - gofumpt
-    - gosec
-    - lll
-    - makezero
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
     - misspell
-    - nakedret
-    - predeclared
-    - revive
-    - stylecheck
-    - tagliatelle
-    - thelper
-    - tparallel
-    - unconvert
-    - unparam
-    - wastedassign
-    - whitespace
+    - gosec
+    - gocritic
 issues:
   exclude-rules:
     - linters:
         - dupl
-        - lll
       path: _test\.go

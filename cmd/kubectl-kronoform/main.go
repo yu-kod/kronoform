@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,9 +54,7 @@ record and accumulate successful YAML files along with the actual resource state
 		Short: "Apply configuration to a resource and record the change",
 		Long: `Apply configuration to a resource by filename or stdin and record the change.
 This command combines kubectl apply with automatic history tracking.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runApply(cmd, args)
-		},
+		RunE: runApply,
 	}
 
 	// Add flags similar to kubectl apply
@@ -69,9 +68,7 @@ This command combines kubectl apply with automatic history tracking.`,
 		Long: `Show the difference between the manifest before and after applying a change.
 This helps you understand what exactly changed in your resources.`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDiff(cmd, args)
-		},
+		RunE: runDiff,
 	}
 
 	rootCmd.AddCommand(applyCmd)
@@ -183,11 +180,25 @@ func readManifestFiles(filenames []string) (string, error) {
 	var allContent strings.Builder
 
 	for _, filename := range filenames {
-		file, err := os.Open(filename)
+		// Path validation to prevent directory traversal and file inclusion attacks
+		cleanPath := filepath.Clean(filename)
+		if strings.Contains(cleanPath, "..") {
+			return "", fmt.Errorf("invalid filename: %s (contains '..')", filename)
+		}
+		// Ensure the path is not absolute and doesn't start with dangerous patterns
+		if filepath.IsAbs(cleanPath) {
+			return "", fmt.Errorf("invalid filename: %s (absolute paths not allowed)", filename)
+		}
+
+		file, err := os.Open(cleanPath) // #nosec G304 - Path is validated above
 		if err != nil {
 			return "", fmt.Errorf("failed to open file %s: %w", filename, err)
 		}
-		defer file.Close()
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to close file %s: %v\n", filename, closeErr)
+			}
+		}()
 
 		content, err := io.ReadAll(file)
 		if err != nil {
