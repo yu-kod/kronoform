@@ -24,9 +24,11 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -52,9 +54,7 @@ record and accumulate successful YAML files along with the actual resource state
 		Short: "Apply configuration to a resource and record the change",
 		Long: `Apply configuration to a resource by filename or stdin and record the change.
 This command combines kubectl apply with automatic history tracking.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runApply(cmd, args)
-		},
+		RunE: runApply,
 	}
 
 	// Add flags similar to kubectl apply
@@ -62,7 +62,17 @@ This command combines kubectl apply with automatic history tracking.`,
 	applyCmd.Flags().Bool("dry-run", false, "If true, only print the object that would be sent, without sending it")
 	applyCmd.Flags().StringP("namespace", "n", "", "If present, the namespace scope for this CLI request")
 
+	var diffCmd = &cobra.Command{
+		Use:   "diff <history-id>",
+		Short: "Show diff between before and after applying a change",
+		Long: `Show the difference between the manifest before and after applying a change.
+This helps you understand what exactly changed in your resources.`,
+		Args: cobra.ExactArgs(1),
+		RunE: runDiff,
+	}
+
 	rootCmd.AddCommand(applyCmd)
+	rootCmd.AddCommand(diffCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -170,11 +180,25 @@ func readManifestFiles(filenames []string) (string, error) {
 	var allContent strings.Builder
 
 	for _, filename := range filenames {
-		file, err := os.Open(filename)
+		// Path validation to prevent directory traversal and file inclusion attacks
+		cleanPath := filepath.Clean(filename)
+		if strings.Contains(cleanPath, "..") {
+			return "", fmt.Errorf("invalid filename: %s (contains '..')", filename)
+		}
+		// Ensure the path is not absolute and doesn't start with dangerous patterns
+		if filepath.IsAbs(cleanPath) {
+			return "", fmt.Errorf("invalid filename: %s (absolute paths not allowed)", filename)
+		}
+
+		file, err := os.Open(cleanPath) // #nosec G304 - Path is validated above
 		if err != nil {
 			return "", fmt.Errorf("failed to open file %s: %w", filename, err)
 		}
-		defer file.Close()
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to close file %s: %v\n", filename, closeErr)
+			}
+		}()
 
 		content, err := io.ReadAll(file)
 		if err != nil {
@@ -372,4 +396,62 @@ func cleanupSnapshot(k8sClient client.Client, snapshotName string, namespace str
 	} else {
 		fmt.Printf("[%s] Kronoform: Cleaned up unused snapshot: %s\n", time.Now().Format("15:04:05"), snapshotName)
 	}
+}
+
+func runDiff(cmd *cobra.Command, args []string) error {
+	fmt.Printf("[%s] Kronoform: Starting diff operation...\n", time.Now().Format("15:04:05"))
+
+	historyID := args[0]
+
+	// Create Kubernetes client
+	k8sClient, err := createK8sClient()
+	if err != nil {
+		return fmt.Errorf("failed to create k8s client: %w", err)
+	}
+
+	// Get history
+	history, err := getHistory(k8sClient, historyID)
+	if err != nil {
+		return fmt.Errorf("failed to get history: %w", err)
+	}
+
+	// Get snapshot
+	snapshot, err := getSnapshot(k8sClient, history.Spec.SnapshotRef)
+	if err != nil {
+		return fmt.Errorf("failed to get snapshot: %w", err)
+	}
+
+	// Show diff
+	return showDiff(snapshot.Spec.Manifests, history.Spec.Manifests)
+}
+
+func getHistory(k8sClient client.Client, historyID string) (*historyv1alpha1.KronoformHistory, error) {
+	history := &historyv1alpha1.KronoformHistory{}
+	err := k8sClient.Get(context.TODO(), client.ObjectKey{
+		Name: historyID,
+	}, history)
+	if err != nil {
+		return nil, err
+	}
+	return history, nil
+}
+
+func getSnapshot(k8sClient client.Client, snapshotName string) (*historyv1alpha1.KronoformSnapshot, error) {
+	snapshot := &historyv1alpha1.KronoformSnapshot{}
+	err := k8sClient.Get(context.TODO(), client.ObjectKey{
+		Name: snapshotName,
+	}, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func showDiff(before, after string) error {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(before, after, false)
+
+	fmt.Println("Diff between before and after:")
+	fmt.Println(dmp.DiffPrettyText(diffs))
+	return nil
 }
