@@ -265,3 +265,53 @@ func UncommentCode(filename, target, prefix string) error {
 
 	return nil
 }
+
+// SetupTestCluster creates a Kind cluster for testing if it doesn't already exist
+func SetupTestCluster() error {
+	clusterName := "kind"
+	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
+		clusterName = v
+	}
+
+	// Check if cluster already exists
+	cmd := exec.Command("kind", "get", "clusters")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get kind clusters: %w", err)
+	}
+
+	clusters := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, c := range clusters {
+		if c == clusterName {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Kind cluster '%s' already exists. Skipping creation.\n", clusterName)
+			return nil
+		}
+	}
+
+	// Create the cluster
+	_, _ = fmt.Fprintf(GinkgoWriter, "Creating Kind cluster '%s'...\n", clusterName)
+	cmd = exec.Command("kind", "create", "cluster", "--name", clusterName)
+	_, err = Run(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to create kind cluster: %w", err)
+	}
+
+	return nil
+}
+
+// CleanupTestCluster deletes the test Kind cluster
+func CleanupTestCluster() error {
+	clusterName := "kind"
+	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
+		clusterName = v
+	}
+
+	_, _ = fmt.Fprintf(GinkgoWriter, "Deleting Kind cluster '%s'...\n", clusterName)
+	cmd := exec.Command("kind", "delete", "cluster", "--name", clusterName)
+	_, err := Run(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to delete kind cluster: %w", err)
+	}
+
+	return nil
+}

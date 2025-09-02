@@ -53,9 +53,13 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	By("setting up test cluster")
+	err := utils.SetupTestCluster()
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to setup test cluster")
+
 	By("building the manager(Operator) image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage)) // #nosec G204 - This is for test environment
-	_, err := utils.Run(cmd)
+	_, err = utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
 
 	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
@@ -85,5 +89,11 @@ var _ = AfterSuite(func() {
 	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
 		utils.UninstallCertManager()
+	}
+
+	By("cleaning up test cluster")
+	err := utils.CleanupTestCluster()
+	if err != nil {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Warning: Failed to cleanup test cluster: %v\n", err)
 	}
 })
