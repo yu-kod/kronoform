@@ -13,8 +13,3 @@ linters:
     - misspell
     - gosec
     - gocritic
-issues:
-  exclude:
-    - linters:
-        - dupl
-      path: _test\.go
