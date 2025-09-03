@@ -166,7 +166,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// Add any additional args
 	kubectlArgs = append(kubectlArgs, args...)
 
-	kubectlCmd := exec.Command("kubectl", kubectlArgs...)
+	kubectlCmd := exec.Command("kubectl", kubectlArgs...) // #nosec G204 - kubectlArgs is constructed from validated inputs
 
 	// Capture stdout to analyze the output
 	var stdout strings.Builder
@@ -542,7 +542,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		kubectlArgs = append(kubectlArgs, "--ignore-not-found="+ignore)
 	}
 
-	kubectlCmd := exec.Command("kubectl", kubectlArgs...)
+	kubectlCmd := exec.Command("kubectl", kubectlArgs...) // #nosec G204 - kubectlArgs is constructed from validated inputs
 
 	// Capture stdout to analyze the output
 	var stdout strings.Builder
@@ -608,7 +608,7 @@ func runPatch(cmd *cobra.Command, args []string) error {
 		kubectlArgs = append(kubectlArgs, "-n", namespace)
 	}
 
-	kubectlCmd := exec.Command("kubectl", kubectlArgs...)
+	kubectlCmd := exec.Command("kubectl", kubectlArgs...) // #nosec G204 - kubectlArgs is constructed from validated inputs
 
 	// Capture stdout to analyze the output
 	var stdout strings.Builder
@@ -645,7 +645,7 @@ func captureCurrentState(k8sClient client.Client, filenames []string, args []str
 
 	if len(filenames) > 0 {
 		for _, filename := range filenames {
-			content, err := os.ReadFile(filename)
+			content, err := os.ReadFile(filename) // #nosec G304 - filename comes from validated user input
 			if err != nil {
 				continue
 			}

@@ -384,14 +384,20 @@ data:
 `
 			tmpFile, err := os.CreateTemp("", "test-manifest-*.yaml")
 			Expect(err).NotTo(HaveOccurred())
-			defer os.Remove(tmpFile.Name())
+			defer func() {
+				if err := os.Remove(tmpFile.Name()); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Warning: failed to remove temp file %s: %v\n", tmpFile.Name(), err)
+				}
+			}()
 
 			_, err = tmpFile.WriteString(manifestContent)
 			Expect(err).NotTo(HaveOccurred())
-			tmpFile.Close()
+			if err := tmpFile.Close(); err != nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Warning: failed to close temp file: %v\n", err)
+			}
 
 			// Run kronoform apply
-			cmd := exec.Command("go", "run", "../../cmd/kubectl-kronoform/main.go", "apply", "-f", tmpFile.Name())
+			cmd := exec.Command("go", "run", "../../cmd/kubectl-kronoform/main.go", "apply", "-f", tmpFile.Name()) // #nosec G204 - This is a test environment with controlled inputs
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to run kronoform apply")
 			Expect(output).To(ContainSubstring("Apply operation completed successfully"))
