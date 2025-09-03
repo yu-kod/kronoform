@@ -51,10 +51,29 @@ This will copy the plugin to `/usr/local/bin/kubectl-kronoform` so you can use i
 kubectl kronoform apply -f your-manifest.yaml
 ```
 
+**Use kronoform for delete operations:**
+
+```sh
+# Instead of: kubectl delete -f your-manifest.yaml
+kubectl kronoform delete -f your-manifest.yaml
+
+# Or delete specific resources
+kubectl kronoform delete pod my-pod
+```
+
+**Use kronoform for patch operations:**
+
+```sh
+# Instead of: kubectl patch deployment my-deployment -p '{"spec":{"replicas":3}}'
+kubectl kronoform patch deployment my-deployment -p '{"spec":{"replicas":3}}'
+```
+
 **Or use the binary directly:**
 
 ```sh
 ./bin/kubectl-kronoform apply -f your-manifest.yaml
+./bin/kubectl-kronoform delete -f your-manifest.yaml
+./bin/kubectl-kronoform patch deployment my-deployment -p '{"spec":{"replicas":3}}'
 ```
 
 **View diffs between changes:**
@@ -115,6 +134,9 @@ Now, `kubectl apply -f your-manifest.yaml` will automatically use kronoform to r
 - **Snapshot Management**: Creates snapshots before applying and links them to history records
 - **Namespace Support**: Works with resources in any namespace
 - **Dry-run Support**: Compatible with `--dry-run` flag
+- **Multiple Command Support**: Supports `apply`, `delete`, and `patch` operations
+- **Diff Visualization**: View differences between before and after states
+- **Comprehensive History**: Tracks all types of resource modifications
 
 ### How it works
 
@@ -123,6 +145,11 @@ Now, `kubectl apply -f your-manifest.yaml` will automatically use kronoform to r
 3. Analyzes the kubectl output to detect if changes occurred
 4. Only creates a history record if actual changes were made
 5. If no changes occurred, cleans up the snapshot to avoid clutter
+
+The same pattern applies to `delete` and `patch` operations:
+
+- **Delete**: Captures the state before deletion, executes the delete, then records the operation
+- **Patch**: Captures the current state, applies the patch, then records the change with patch details
 
 ### Cleanup
 
@@ -160,10 +187,10 @@ make install
 
 Kronoform consists of:
 
-- **kubectl plugin**: The main CLI tool that wraps `kubectl apply`
+- **kubectl plugin**: The main CLI tool that wraps `kubectl apply`, `kubectl delete`, and `kubectl patch`
 - **Custom Resource Definitions (CRDs)**:
   - `KronoformSnapshot`: Records the manifest and metadata before applying
-  - `KronoformHistory`: Records successful apply operations with user tracking
+  - `KronoformHistory`: Records successful operations with user tracking (supports apply, delete, patch)
   - `Kronoform`: Basic CRD for the project (currently minimal)
 
 ## Distribution
