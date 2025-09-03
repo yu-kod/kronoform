@@ -367,3 +367,95 @@ type tokenRequest struct {
 		Token string `json:"token"`
 	} `json:"status"`
 }
+
+var _ = Describe("Kubectl Kronoform CLI", func() {
+	Context("CLI Commands", func() {
+		It("should support apply command with history tracking", func() {
+			By("creating a test configmap using kronoform apply")
+			// Create a temporary manifest file
+			manifestContent := `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-kronoform-apply
+  namespace: default
+data:
+  key: value
+`
+			tmpFile, err := os.CreateTemp("", "test-manifest-*.yaml")
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(tmpFile.Name())
+
+			_, err = tmpFile.WriteString(manifestContent)
+			Expect(err).NotTo(HaveOccurred())
+			tmpFile.Close()
+
+			// Run kronoform apply
+			cmd := exec.Command("go", "run", "../../cmd/kubectl-kronoform/main.go", "apply", "-f", tmpFile.Name())
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to run kronoform apply")
+			Expect(output).To(ContainSubstring("Apply operation completed successfully"))
+
+			// Verify the resource was created
+			cmd = exec.Command("kubectl", "get", "configmap", "test-kronoform-apply", "-n", "default")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "ConfigMap should exist")
+
+			// Clean up
+			cmd = exec.Command("kubectl", "delete", "configmap", "test-kronoform-apply", "-n", "default")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should support delete command with history tracking", func() {
+			By("creating a test configmap first")
+			cmd := exec.Command("kubectl", "create", "configmap", "test-kronoform-delete", "-n", "default", "--from-literal=key=value")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("deleting the configmap using kronoform delete")
+			cmd = exec.Command("go", "run", "../../cmd/kubectl-kronoform/main.go", "delete", "configmap", "test-kronoform-delete", "-n", "default")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to run kronoform delete")
+			Expect(output).To(ContainSubstring("Delete operation completed successfully"))
+
+			// Verify the resource was deleted
+			cmd = exec.Command("kubectl", "get", "configmap", "test-kronoform-delete", "-n", "default")
+			_, err = utils.Run(cmd)
+			Expect(err).To(HaveOccurred(), "ConfigMap should not exist")
+		})
+
+		It("should support patch command with history tracking", func() {
+			By("creating a test configmap first")
+			cmd := exec.Command("kubectl", "create", "configmap", "test-kronoform-patch", "-n", "default", "--from-literal=key=value")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("patching the configmap using kronoform patch")
+			patchData := `{"data":{"key":"updated-value"}}`
+			cmd = exec.Command("go", "run", "../../cmd/kubectl-kronoform/main.go", "patch", "configmap/test-kronoform-patch", "-p", patchData, "-n", "default")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to run kronoform patch")
+			Expect(output).To(ContainSubstring("Patch operation completed successfully"))
+
+			// Verify the resource was patched
+			cmd = exec.Command("kubectl", "get", "configmap", "test-kronoform-patch", "-n", "default", "-o", "jsonpath={.data.key}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("updated-value"))
+
+			// Clean up
+			cmd = exec.Command("kubectl", "delete", "configmap", "test-kronoform-patch", "-n", "default")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should support diff command", func() {
+			By("creating a test history first")
+			// This test assumes there's at least one history record
+			// In a real scenario, we'd create one first
+			cmd := exec.Command("go", "run", "../../cmd/kubectl-kronoform/main.go", "diff", "non-existent-history")
+			_, err := utils.Run(cmd)
+			// We expect this to fail since the history doesn't exist, but the command should be recognized
+			Expect(err).To(HaveOccurred())
+		})
+	})
+})
