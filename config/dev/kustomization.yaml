@@ -2,3 +2,7 @@ resources:
   - ../default
 patchesStrategicMerge:
   - ./manager.yaml
+images:
+  - name: ghcr.io/yu-kod/kronoform
+    newName: controller
+    newTag: latest
