@@ -20,6 +20,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ResourceChange represents a change made to a Kubernetes resource
+type ResourceChange struct {
+	// Resource identifies the resource (e.g., "deployment.apps/my-deployment")
+	// +required
+	Resource string `json:"resource"`
+
+	// Operation indicates what operation was performed (Created, Configured, Unchanged, Deleted)
+	// +required
+	Operation string `json:"operation"`
+}
+
 // ResourceSnapshot represents the state of a single Kubernetes resource
 type ResourceSnapshot struct {
 	// APIVersion of the resource
@@ -80,6 +91,10 @@ type KronoformHistorySpec struct {
 	// ResourceNamespaces contains the list of namespaces affected
 	// +optional
 	ResourceNamespaces []string `json:"resourceNamespaces,omitempty"`
+
+	// ResourceChanges contains detailed changes for each resource
+	// +optional
+	ResourceChanges []ResourceChange `json:"resourceChanges,omitempty"`
 }
 
 // KronoformHistoryStatus defines the observed state of KronoformHistory

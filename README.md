@@ -76,13 +76,19 @@ kubectl kronoform patch deployment my-deployment -p '{"spec":{"replicas":3}}'
 ./bin/kubectl-kronoform patch deployment my-deployment -p '{"spec":{"replicas":3}}'
 ```
 
-**View diffs between changes:**
+**View timeline of changes:**
 
 ```sh
-kubectl kronoform diff <history-id>
+kubectl kronoform diff
 ```
 
-This shows the differences between the manifest before and after applying changes.
+This shows a comprehensive timeline of all recorded changes in a table format, displaying:
+- When each change was applied
+- What operation was performed (Apply/Delete/Patch)
+- Which resources were created, modified, or deleted
+- Interactive YAML content viewing for any change
+
+The timeline provides a clear overview of your cluster's change history at a glance.
 
 **Test with example resources:**
 
@@ -92,6 +98,9 @@ kubectl kronoform apply -f config/samples/configmap_example.yaml
 
 # Test with Deployment example
 kubectl kronoform apply -f config/samples/deployment_example.yaml
+
+# View the timeline of changes
+kubectl kronoform diff
 
 # View the recorded history
 kubectl get kronoformhistories
@@ -135,7 +144,8 @@ Now, `kubectl apply -f your-manifest.yaml` will automatically use kronoform to r
 - **Namespace Support**: Works with resources in any namespace
 - **Dry-run Support**: Compatible with `--dry-run` flag
 - **Multiple Command Support**: Supports `apply`, `delete`, and `patch` operations
-- **Diff Visualization**: View differences between before and after states
+- **Timeline Visualization**: View a comprehensive timeline of all changes with resource details
+- **Interactive YAML Viewing**: Interactively browse and view YAML content for any recorded change
 - **Comprehensive History**: Tracks all types of resource modifications
 
 ### How it works
@@ -190,7 +200,7 @@ Kronoform consists of:
 - **kubectl plugin**: The main CLI tool that wraps `kubectl apply`, `kubectl delete`, and `kubectl patch`
 - **Custom Resource Definitions (CRDs)**:
   - `KronoformSnapshot`: Records the manifest and metadata before applying
-  - `KronoformHistory`: Records successful operations with user tracking (supports apply, delete, patch)
+  - `KronoformHistory`: Records successful operations with user tracking and detailed resource changes (supports apply, delete, patch)
   - `Kronoform`: Basic CRD for the project (currently minimal)
 
 ## Distribution

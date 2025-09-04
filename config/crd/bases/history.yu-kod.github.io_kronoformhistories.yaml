@@ -69,6 +69,24 @@ spec:
                 description: Manifests contains the original YAML manifests that were
                   applied
                 type: string
+              resourceChanges:
+                description: ResourceChanges contains detailed changes for each resource
+                items:
+                  description: ResourceChange represents a change made to a Kubernetes
+                    resource
+                  properties:
+                    operation:
+                      description: Operation indicates what operation was performed
+                        (Created, Configured, Unchanged, Deleted)
+                      type: string
+                    resource:
+                      description: Resource identifies the resource (e.g., "deployment.apps/my-deployment")
+                      type: string
+                  required:
+                  - operation
+                  - resource
+                  type: object
+                type: array
               resourceNames:
                 description: ResourceNames contains the list of resource names affected
                   (e.g., ["my-configmap", "my-deployment"])

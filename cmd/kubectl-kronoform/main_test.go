@@ -58,12 +58,12 @@ func TestRunDiff(t *testing.T) {
 		g.Expect(err).To(gomega.BeNil())
 
 		// Test getHistory
-		retrievedHistory, err := getHistory(fakeClient, "test-history")
+		retrievedHistory, err := getHistory(fakeClient, "test-history", "default")
 		g.Expect(err).To(gomega.BeNil())
 		g.Expect(retrievedHistory.Spec.Manifests).To(gomega.Equal(history.Spec.Manifests))
 
 		// Test getSnapshot
-		retrievedSnapshot, err := getSnapshot(fakeClient, "test-snapshot")
+		retrievedSnapshot, err := getSnapshot(fakeClient, "test-snapshot", "default")
 		g.Expect(err).To(gomega.BeNil())
 		g.Expect(retrievedSnapshot.Spec.Manifests).To(gomega.Equal(snapshot.Spec.Manifests))
 	})
@@ -79,7 +79,7 @@ func TestRunDiff(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 		// Test non-existent history
-		_, err := getHistory(fakeClient, "non-existent")
+		_, err := getHistory(fakeClient, "non-existent", "default")
 		g.Expect(err).To(gomega.HaveOccurred())
 	})
 }
