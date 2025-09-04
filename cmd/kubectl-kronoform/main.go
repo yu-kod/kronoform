@@ -25,11 +25,14 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -63,11 +66,10 @@ This command combines kubectl apply with automatic history tracking.`,
 	applyCmd.Flags().StringP("namespace", "n", "", "If present, the namespace scope for this CLI request")
 
 	var diffCmd = &cobra.Command{
-		Use:   "diff <history-id>",
-		Short: "Show diff between before and after applying a change",
-		Long: `Show the difference between the manifest before and after applying a change.
-This helps you understand what exactly changed in your resources.`,
-		Args: cobra.ExactArgs(1),
+		Use:   "diff",
+		Short: "Show timeline of changes with resource details",
+		Long: `Display a timeline of all recorded changes, showing when each change was applied
+and what resources were created, modified, or deleted.`,
 		RunE: runDiff,
 	}
 
@@ -183,11 +185,17 @@ func runApply(cmd *cobra.Command, args []string) error {
 	fmt.Printf("[%s] Kronoform: Apply operation completed successfully\n", time.Now().Format("15:04:05"))
 
 	// Check if there were actual changes by analyzing kubectl output
-	hasChanges := analyzeKubectlOutput(stdout.String())
+	hasChanges, changes := analyzeKubectlOutput(stdout.String())
 
 	// Create history record after successful apply only if there were changes
 	if !dryRun && k8sClient != nil && snapshotName != "" && hasChanges {
-		err = createHistory(k8sClient, manifestContent, snapshotName, namespace)
+		// Get actual state after apply
+		actualState, err := getActualState(manifestContent, namespace)
+		if err != nil {
+			fmt.Printf("[%s] Kronoform: Warning - Could not get actual state: %v\n", time.Now().Format("15:04:05"), err)
+			actualState = manifestContent // fallback to manifest
+		}
+		err = createHistory(k8sClient, actualState, snapshotName, namespace, changes)
 		if err != nil {
 			fmt.Printf("[%s] Kronoform: Warning - Could not create history: %v\n", time.Now().Format("15:04:05"), err)
 		} else {
@@ -244,6 +252,20 @@ func readManifestFiles(filenames []string) (string, error) {
 	return allContent.String(), nil
 }
 
+// getCurrentNamespace gets the current kubectl namespace
+func getCurrentNamespace() (string, error) {
+	cmd := exec.Command("kubectl", "config", "view", "--minify", "--output", "jsonpath={..namespace}")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	namespace := strings.TrimSpace(string(output))
+	if namespace == "" {
+		namespace = "default"
+	}
+	return namespace, nil
+}
+
 // createK8sClient creates a Kubernetes client using the default kubeconfig
 func createK8sClient() (client.Client, error) {
 	config, err := rest.InClusterConfig()
@@ -270,6 +292,55 @@ func createK8sClient() (client.Client, error) {
 	}
 
 	return c, nil
+}
+
+// getActualState retrieves the actual state of resources from the cluster after apply
+func getActualState(manifestContent, namespace string) (string, error) {
+	var actualStates []string
+
+	// Split manifest into individual resources
+	resources := strings.Split(manifestContent, "---")
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+
+		// Extract kind, name, namespace using regex
+		kindRegex := regexp.MustCompile(`kind:\s*(\w+)`)
+		nameRegex := regexp.MustCompile(`name:\s*([^\s]+)`)
+		nsRegex := regexp.MustCompile(`namespace:\s*([^\s]+)`)
+
+		kindMatch := kindRegex.FindStringSubmatch(resource)
+		nameMatch := nameRegex.FindStringSubmatch(resource)
+		nsMatch := nsRegex.FindStringSubmatch(resource)
+
+		if len(kindMatch) < 2 || len(nameMatch) < 2 {
+			continue
+		}
+
+		kind := kindMatch[1]
+		name := nameMatch[1]
+		resNamespace := namespace
+		if len(nsMatch) >= 2 {
+			resNamespace = nsMatch[1]
+		}
+		if resNamespace == "" {
+			resNamespace = "default"
+		}
+
+		// Get actual state using kubectl
+		cmd := exec.Command("kubectl", "get", strings.ToLower(kind), name, "-n", resNamespace, "-o", "yaml")
+		output, err := cmd.Output()
+		if err != nil {
+			// If get fails, use original manifest
+			actualStates = append(actualStates, resource)
+		} else {
+			actualStates = append(actualStates, string(output))
+		}
+	}
+
+	return strings.Join(actualStates, "\n---\n"), nil
 }
 
 // createSnapshot creates a KronoformSnapshot resource
@@ -310,7 +381,7 @@ func createSnapshot(k8sClient client.Client, manifestContent string, namespace s
 }
 
 // createHistory creates a KronoformHistory resource
-func createHistory(k8sClient client.Client, manifestContent string, snapshotName string, namespace string) error {
+func createHistory(k8sClient client.Client, manifestContent string, snapshotName string, namespace string, changes []historyv1alpha1.ResourceChange) error {
 	ctx := context.Background()
 	now := metav1.Now()
 
@@ -330,10 +401,11 @@ func createHistory(k8sClient client.Client, manifestContent string, snapshotName
 			Namespace: getTargetNamespace(namespace),
 		},
 		Spec: historyv1alpha1.KronoformHistorySpec{
-			Manifests:   manifestContent,
-			SnapshotRef: snapshotName,
-			Description: fmt.Sprintf("Applied by %s", appliedBy),
-			AppliedBy:   appliedBy,
+			Manifests:       manifestContent,
+			SnapshotRef:     snapshotName,
+			Description:     fmt.Sprintf("Applied by %s", appliedBy),
+			AppliedBy:       appliedBy,
+			ResourceChanges: changes,
 		},
 		Status: historyv1alpha1.KronoformHistoryStatus{
 			AppliedAt: &now,
@@ -345,21 +417,23 @@ func createHistory(k8sClient client.Client, manifestContent string, snapshotName
 		return err
 	}
 
-	// Update snapshot status to reference the history
+	// Update snapshot status to reference the history (only if snapshot exists)
 	snapshot := &historyv1alpha1.KronoformSnapshot{}
 	if err := k8sClient.Get(ctx, client.ObjectKey{
 		Name:      snapshotName,
 		Namespace: getTargetNamespace(namespace),
-	}, snapshot); err != nil {
-		return err
+	}, snapshot); err == nil {
+		// Snapshot exists, update it
+		snapshot.Status.Phase = "Completed"
+		snapshot.Status.AppliedAt = &now
+		snapshot.Status.HistoryRef = historyName
+		snapshot.Status.Message = "Successfully applied and recorded"
+		return k8sClient.Status().Update(ctx, snapshot)
+	} else {
+		// Snapshot doesn't exist (e.g., for delete operations), just return success
+		fmt.Printf("[%s] Kronoform: History recorded without snapshot update\n", time.Now().Format("15:04:05"))
+		return nil
 	}
-
-	snapshot.Status.Phase = "Completed"
-	snapshot.Status.AppliedAt = &now
-	snapshot.Status.HistoryRef = historyName
-	snapshot.Status.Message = "Successfully applied and recorded"
-
-	return k8sClient.Status().Update(ctx, snapshot)
 }
 
 // getTargetNamespace returns the appropriate namespace to use
@@ -370,8 +444,11 @@ func getTargetNamespace(namespace string) string {
 	return "default"
 }
 
-// analyzeKubectlOutput analyzes kubectl apply output to determine if changes were made
-func analyzeKubectlOutput(output string) bool {
+// analyzeKubectlOutput analyzes kubectl apply output to determine if changes were made and extract resource changes
+func analyzeKubectlOutput(output string) (bool, []historyv1alpha1.ResourceChange) {
+	var changes []historyv1alpha1.ResourceChange
+	hasChanges := false
+
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -381,20 +458,75 @@ func analyzeKubectlOutput(output string) bool {
 			continue
 		}
 
-		// Check for change indicators
-		if strings.Contains(line, "created") ||
-			strings.Contains(line, "configured") ||
-			strings.Contains(line, "deleted") {
-			return true
-		}
+		// Parse lines like "deployment.apps/kronoform-demo-app configured" or "deployment.apps "kronoform-demo-app" deleted"
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			resource := parts[0]
+			var operation string
 
-		// Skip "unchanged" lines - these indicate no changes
-		if strings.Contains(line, "unchanged") {
-			continue
+			// Handle different output formats
+			if len(parts) == 2 {
+				// Format: "resource operation" (apply)
+				operation = parts[1]
+			} else if len(parts) == 3 && parts[1] == `"`+strings.Trim(parts[1], `"`) && parts[2] == "deleted" {
+				// Format: 'resource "name" deleted' (delete)
+				resource = parts[0] + "/" + strings.Trim(parts[1], `"`)
+				operation = parts[2]
+			} else if len(parts) >= 3 {
+				// Try to find the operation
+				for i, part := range parts {
+					if part == "created" || part == "configured" || part == "unchanged" || part == "deleted" {
+						operation = part
+						if i > 0 {
+							resource = strings.Join(parts[:i], " ")
+						}
+						break
+					}
+				}
+			}
+
+			if operation != "" {
+				// Clean up resource name (remove .apps, .v1, etc.)
+				resource = cleanResourceName(resource)
+
+				// Capitalize operation
+				switch strings.ToLower(operation) {
+				case "created":
+					operation = "Created"
+				case "configured":
+					operation = "Configured"
+				case "unchanged":
+					operation = "Unchanged"
+				case "deleted":
+					operation = "Deleted"
+				}
+
+				changes = append(changes, historyv1alpha1.ResourceChange{
+					Resource:  resource,
+					Operation: operation,
+				})
+
+				if operation == "Created" || operation == "Configured" || operation == "Deleted" {
+					hasChanges = true
+				}
+			}
 		}
 	}
 
-	return false
+	return hasChanges, changes
+}
+
+// cleanResourceName cleans up Kubernetes resource names for better display
+func cleanResourceName(resource string) string {
+	// Remove common API group suffixes to make names shorter and clearer
+	resource = strings.ReplaceAll(resource, ".apps", "")
+	resource = strings.ReplaceAll(resource, ".v1", "")
+	resource = strings.ReplaceAll(resource, ".batch", "")
+	resource = strings.ReplaceAll(resource, ".networking.k8s.io", "")
+	resource = strings.ReplaceAll(resource, ".rbac.authorization.k8s.io", "")
+	resource = strings.ReplaceAll(resource, ".storage.k8s.io", "")
+	resource = strings.ReplaceAll(resource, ".apiextensions.k8s.io", "")
+	return resource
 }
 
 // cleanupSnapshot removes a snapshot that was created but not needed due to no changes
@@ -428,37 +560,11 @@ func cleanupSnapshot(k8sClient client.Client, snapshotName string, namespace str
 	}
 }
 
-func runDiff(cmd *cobra.Command, args []string) error {
-	fmt.Printf("[%s] Kronoform: Starting diff operation...\n", time.Now().Format("15:04:05"))
-
-	historyID := args[0]
-
-	// Create Kubernetes client
-	k8sClient, err := createK8sClient()
-	if err != nil {
-		return fmt.Errorf("failed to create k8s client: %w", err)
-	}
-
-	// Get history
-	history, err := getHistory(k8sClient, historyID)
-	if err != nil {
-		return fmt.Errorf("failed to get history: %w", err)
-	}
-
-	// Get snapshot
-	snapshot, err := getSnapshot(k8sClient, history.Spec.SnapshotRef)
-	if err != nil {
-		return fmt.Errorf("failed to get snapshot: %w", err)
-	}
-
-	// Show diff
-	return showDiff(snapshot.Spec.Manifests, history.Spec.Manifests)
-}
-
-func getHistory(k8sClient client.Client, historyID string) (*historyv1alpha1.KronoformHistory, error) {
+func getHistory(k8sClient client.Client, historyID string, namespace string) (*historyv1alpha1.KronoformHistory, error) {
 	history := &historyv1alpha1.KronoformHistory{}
 	err := k8sClient.Get(context.TODO(), client.ObjectKey{
-		Name: historyID,
+		Name:      historyID,
+		Namespace: namespace,
 	}, history)
 	if err != nil {
 		return nil, err
@@ -466,10 +572,11 @@ func getHistory(k8sClient client.Client, historyID string) (*historyv1alpha1.Kro
 	return history, nil
 }
 
-func getSnapshot(k8sClient client.Client, snapshotName string) (*historyv1alpha1.KronoformSnapshot, error) {
+func getSnapshot(k8sClient client.Client, snapshotName string, namespace string) (*historyv1alpha1.KronoformSnapshot, error) {
 	snapshot := &historyv1alpha1.KronoformSnapshot{}
 	err := k8sClient.Get(context.TODO(), client.ObjectKey{
-		Name: snapshotName,
+		Name:      snapshotName,
+		Namespace: namespace,
 	}, snapshot)
 	if err != nil {
 		return nil, err
@@ -478,12 +585,140 @@ func getSnapshot(k8sClient client.Client, snapshotName string) (*historyv1alpha1
 }
 
 func showDiff(before, after string) error {
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(before, after, false)
+	// Parse YAMLs
+	var beforeObj, afterObj map[interface{}]interface{}
+	if err := yaml.Unmarshal([]byte(before), &beforeObj); err != nil {
+		return fmt.Errorf("failed to parse before YAML: %w", err)
+	}
+	if err := yaml.Unmarshal([]byte(after), &afterObj); err != nil {
+		return fmt.Errorf("failed to parse after YAML: %w", err)
+	}
 
-	fmt.Println("Diff between before and after:")
+	// Remove unwanted fields
+	removeUnwantedFields(beforeObj)
+	removeUnwantedFields(afterObj)
+
+	// Convert back to YAML for diff
+	beforeClean, err := yaml.Marshal(beforeObj)
+	if err != nil {
+		return fmt.Errorf("failed to marshal before: %w", err)
+	}
+	afterClean, err := yaml.Marshal(afterObj)
+	if err != nil {
+		return fmt.Errorf("failed to marshal after: %w", err)
+	}
+
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(string(beforeClean), string(afterClean), false)
+
+	fmt.Println("Diff between before and after (filtered):")
 	fmt.Println(dmp.DiffPrettyText(diffs))
 	return nil
+}
+
+func runDiff(cmd *cobra.Command, args []string) error {
+	fmt.Printf("[%s] Kronoform: Showing timeline of changes...\n", time.Now().Format("15:04:05"))
+
+	// Get current namespace
+	namespace, err := getCurrentNamespace()
+	if err != nil {
+		return fmt.Errorf("failed to get current namespace: %w", err)
+	}
+
+	// Create Kubernetes client
+	k8sClient, err := createK8sClient()
+	if err != nil {
+		return fmt.Errorf("failed to create k8s client: %w", err)
+	}
+
+	// List all histories
+	histories := &historyv1alpha1.KronoformHistoryList{}
+	err = k8sClient.List(context.TODO(), histories, client.InNamespace(namespace))
+	if err != nil {
+		return fmt.Errorf("failed to list histories: %w", err)
+	}
+
+	// Sort by creation time
+	sort.Slice(histories.Items, func(i, j int) bool {
+		return histories.Items[i].CreationTimestamp.Before(&histories.Items[j].CreationTimestamp)
+	})
+
+	fmt.Println("Timeline of Changes:")
+	fmt.Println("====================")
+
+	// Print table header
+	fmt.Printf("%-3s %-20s %-15s %-35s %-35s %-35s %-30s\n", "#", "Time", "Operation", "Created", "Modified", "Deleted", "Snapshot ID")
+	fmt.Println(strings.Repeat("-", 173))
+
+	for i, history := range histories.Items {
+		timeStr := history.CreationTimestamp.Format("2006-01-02 15:04:05")
+		operation := "Apply" // Default, could be enhanced to detect from snapshot name
+		if strings.HasPrefix(history.Spec.SnapshotRef, "delete-") {
+			operation = "Delete"
+		} else if strings.HasPrefix(history.Spec.SnapshotRef, "patch-") {
+			operation = "Patch"
+		}
+
+		// Count resources by operation
+		var created, modified, deleted []string
+		for _, change := range history.Spec.ResourceChanges {
+			switch change.Operation {
+			case "Created":
+				created = append(created, change.Resource)
+			case "Configured":
+				modified = append(modified, change.Resource)
+			case "Deleted":
+				deleted = append(deleted, change.Resource)
+			}
+		}
+
+		// Format resource lists (truncate if too long)
+		createdStr := strings.Join(created, ", ")
+		if len(createdStr) > 33 {
+			createdStr = createdStr[:30] + "..."
+		}
+		modifiedStr := strings.Join(modified, ", ")
+		if len(modifiedStr) > 33 {
+			modifiedStr = modifiedStr[:30] + "..."
+		}
+		deletedStr := strings.Join(deleted, ", ")
+		if len(deletedStr) > 33 {
+			deletedStr = deletedStr[:30] + "..."
+		}
+
+		fmt.Printf("%-3d %-20s %-15s %-35s %-35s %-35s %-30s\n", i+1, timeStr, operation, createdStr, modifiedStr, deletedStr, history.Spec.SnapshotRef)
+	}
+
+	// Interactive selection
+	if len(histories.Items) > 0 {
+		fmt.Printf("\nEnter the number of the history to view YAML content (1-%d, or 0 to exit): ", len(histories.Items))
+		var choice int
+		fmt.Scanf("%d", &choice)
+		if choice > 0 && choice <= len(histories.Items) {
+			selected := histories.Items[choice-1]
+			fmt.Printf("\nYAML Content for History %s:\n", selected.Name)
+			fmt.Println("=====================================")
+			fmt.Println(selected.Spec.Manifests)
+		}
+	}
+
+	return nil
+}
+
+// removeUnwantedFields removes Kubernetes-managed fields that shouldn't be compared
+func removeUnwantedFields(obj map[interface{}]interface{}) {
+	// Remove status
+	delete(obj, "status")
+
+	// Remove unwanted metadata fields
+	if metadata, ok := obj["metadata"].(map[interface{}]interface{}); ok {
+		delete(metadata, "creationTimestamp")
+		delete(metadata, "resourceVersion")
+		delete(metadata, "uid")
+		delete(metadata, "generation")
+		delete(metadata, "managedFields")
+		delete(metadata, "annotations") // Remove all annotations for simplicity
+	}
 }
 
 func runDelete(cmd *cobra.Command, args []string) error {
@@ -558,9 +793,14 @@ func runDelete(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("[%s] Kronoform: Delete operation completed successfully\n", time.Now().Format("15:04:05"))
 
+	// Analyze kubectl output to extract resource changes
+	hasChanges, changes := analyzeKubectlOutput(stdout.String())
+
 	// Create history record for the delete operation
-	if k8sClient != nil && beforeState != "" {
-		err = createDeleteHistory(k8sClient, beforeState, namespace, args, filenames)
+	if k8sClient != nil && beforeState != "" && hasChanges {
+		// Generate snapshot name for delete operation
+		snapshotName := fmt.Sprintf("delete-%s", time.Now().Format("20060102-150405"))
+		err = createHistory(k8sClient, beforeState, snapshotName, namespace, changes)
 		if err != nil {
 			fmt.Printf("[%s] Kronoform: Warning - Could not create delete history: %v\n", time.Now().Format("15:04:05"), err)
 		} else {
@@ -624,9 +864,14 @@ func runPatch(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("[%s] Kronoform: Patch operation completed successfully\n", time.Now().Format("15:04:05"))
 
+	// Analyze kubectl output to extract resource changes
+	hasChanges, changes := analyzeKubectlOutput(stdout.String())
+
 	// Create history record for the patch operation
-	if k8sClient != nil && beforeState != "" {
-		err = createPatchHistory(k8sClient, beforeState, patchData, resource, namespace, patchType)
+	if k8sClient != nil && beforeState != "" && hasChanges {
+		// Generate snapshot name for patch operation
+		snapshotName := fmt.Sprintf("patch-%s", time.Now().Format("20060102-150405"))
+		err = createHistory(k8sClient, beforeState, snapshotName, namespace, changes)
 		if err != nil {
 			fmt.Printf("[%s] Kronoform: Warning - Could not create patch history: %v\n", time.Now().Format("15:04:05"), err)
 		} else {

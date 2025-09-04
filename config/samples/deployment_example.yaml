@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/name: kronoform-demo
     app.kubernetes.io/managed-by: kronoform
 spec:
-  replicas: 2
+  replicas: 10
   selector:
     matchLabels:
       app: kronoform-demo
@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: demo-app
-          image: nginx:1.21
+          image: nginx:1.24
           ports:
             - containerPort: 80
           env:
