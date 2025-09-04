@@ -321,16 +321,25 @@ func getActualState(manifestContent, namespace string) (string, error) {
 
 		kind := kindMatch[1]
 		name := nameMatch[1]
+		
+		// Validate extracted values to prevent command injection
+		if !isValidKubernetesName(kind) || !isValidKubernetesName(name) {
+			continue
+		}
+		
 		resNamespace := namespace
 		if len(nsMatch) >= 2 {
 			resNamespace = nsMatch[1]
+			if !isValidKubernetesName(resNamespace) {
+				resNamespace = "default"
+			}
 		}
 		if resNamespace == "" {
 			resNamespace = "default"
 		}
 
 		// Get actual state using kubectl
-		cmd := exec.Command("kubectl", "get", strings.ToLower(kind), name, "-n", resNamespace, "-o", "yaml")
+		cmd := exec.Command("kubectl", "get", strings.ToLower(kind), name, "-n", resNamespace, "-o", "yaml") // #nosec G204 - validated inputs
 		output, err := cmd.Output()
 		if err != nil {
 			// If get fails, use original manifest
@@ -465,14 +474,15 @@ func analyzeKubectlOutput(output string) (bool, []historyv1alpha1.ResourceChange
 			var operation string
 
 			// Handle different output formats
-			if len(parts) == 2 {
+			switch {
+			case len(parts) == 2:
 				// Format: "resource operation" (apply)
 				operation = parts[1]
-			} else if len(parts) == 3 && parts[1] == `"`+strings.Trim(parts[1], `"`) && parts[2] == "deleted" {
+			case len(parts) == 3 && parts[1] == `"`+strings.Trim(parts[1], `"`) && parts[2] == "deleted":
 				// Format: 'resource "name" deleted' (delete)
 				resource = parts[0] + "/" + strings.Trim(parts[1], `"`)
 				operation = parts[2]
-			} else if len(parts) >= 3 {
+			case len(parts) >= 3:
 				// Try to find the operation
 				for i, part := range parts {
 					if part == "created" || part == "configured" || part == "unchanged" || part == "deleted" {
@@ -514,6 +524,28 @@ func analyzeKubectlOutput(output string) (bool, []historyv1alpha1.ResourceChange
 	}
 
 	return hasChanges, changes
+}
+
+// isValidKubernetesName validates if a string is a valid Kubernetes resource name
+func isValidKubernetesName(name string) bool {
+	if name == "" || len(name) > 253 {
+		return false
+	}
+	
+	// Kubernetes resource names must consist of lower case alphanumeric characters, '-', and '.'
+	// and must start and end with an alphanumeric character
+	for i, r := range name {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '.' {
+			return false
+		}
+		if i == 0 && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+		if i == len(name)-1 && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // cleanResourceName cleans up Kubernetes resource names for better display
@@ -693,7 +725,11 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	if len(histories.Items) > 0 {
 		fmt.Printf("\nEnter the number of the history to view YAML content (1-%d, or 0 to exit): ", len(histories.Items))
 		var choice int
-		fmt.Scanf("%d", &choice)
+		_, err := fmt.Scanf("%d", &choice)
+		if err != nil {
+			fmt.Printf("[%s] Kronoform: Invalid input, exiting\n", time.Now().Format("15:04:05"))
+			return nil
+		}
 		if choice > 0 && choice <= len(histories.Items) {
 			selected := histories.Items[choice-1]
 			fmt.Printf("\nYAML Content for History %s:\n", selected.Name)
@@ -908,66 +944,4 @@ func captureResourceState(k8sClient client.Client, resource string, namespace st
 	// This is a simplified implementation - in practice, you'd need to query the actual resource
 	// For now, we'll create a placeholder
 	return fmt.Sprintf("# Current state of resource: %s\n", resource), nil
-}
-
-func createDeleteHistory(k8sClient client.Client, beforeState string, namespace string, args []string, filenames []string) error {
-	ctx := context.Background()
-	now := metav1.Now()
-
-	currentUser, _ := user.Current()
-	appliedBy := "unknown"
-	if currentUser != nil {
-		appliedBy = currentUser.Username
-	}
-
-	historyName := fmt.Sprintf("kronoform-delete-%d", now.Unix())
-
-	history := &historyv1alpha1.KronoformHistory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      historyName,
-			Namespace: getTargetNamespace(namespace),
-		},
-		Spec: historyv1alpha1.KronoformHistorySpec{
-			Manifests:   beforeState,
-			Description: fmt.Sprintf("Deleted by %s: %s", appliedBy, strings.Join(append(args, filenames...), " ")),
-			AppliedBy:   appliedBy,
-		},
-		Status: historyv1alpha1.KronoformHistoryStatus{
-			AppliedAt: &now,
-			Summary:   "Successfully deleted resources",
-		},
-	}
-
-	return k8sClient.Create(ctx, history)
-}
-
-func createPatchHistory(k8sClient client.Client, beforeState string, patchData string, resource string, namespace string, patchType string) error {
-	ctx := context.Background()
-	now := metav1.Now()
-
-	currentUser, _ := user.Current()
-	appliedBy := "unknown"
-	if currentUser != nil {
-		appliedBy = currentUser.Username
-	}
-
-	historyName := fmt.Sprintf("kronoform-patch-%d", now.Unix())
-
-	history := &historyv1alpha1.KronoformHistory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      historyName,
-			Namespace: getTargetNamespace(namespace),
-		},
-		Spec: historyv1alpha1.KronoformHistorySpec{
-			Manifests:   fmt.Sprintf("%s\n# Patch applied: %s", beforeState, patchData),
-			Description: fmt.Sprintf("Patched by %s: %s (type: %s)", appliedBy, resource, patchType),
-			AppliedBy:   appliedBy,
-		},
-		Status: historyv1alpha1.KronoformHistoryStatus{
-			AppliedAt: &now,
-			Summary:   "Successfully patched resource",
-		},
-	}
-
-	return k8sClient.Create(ctx, history)
 }
