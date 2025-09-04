@@ -3,7 +3,7 @@ module github.com/yu-kod/kronoform
 go 1.24.0
 
 require (
-	github.com/onsi/ginkgo/v2 v2.25.2
+	github.com/onsi/ginkgo/v2 v2.25.3
 	github.com/onsi/gomega v1.38.2
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.10.1
