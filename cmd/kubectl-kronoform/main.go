@@ -280,7 +280,9 @@ func readSingleManifestFile(filename string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filename, err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	// Use LimitReader to prevent memory exhaustion from large files
 	limitedReader := io.LimitReader(file, maxManifestSize+1)
@@ -662,7 +664,7 @@ func getResourceState(info ResourceInfo) (string, error) {
 		args = append(args, "-n", info.Namespace)
 	}
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.Command("kubectl", args...) // #nosec G204 - args are from parsed YAML, not shell-executed
 	output, err := cmd.Output()
 	if err != nil {
 		// Resource might not exist yet (will be created)
