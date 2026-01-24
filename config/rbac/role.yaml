@@ -30,3 +30,55 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoformhistories
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoformhistories/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoformhistories/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoformsnapshots
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoformsnapshots/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - history.yu-kod.github.io
+  resources:
+  - kronoformsnapshots/status
+  verbs:
+  - get
+  - patch
+  - update
