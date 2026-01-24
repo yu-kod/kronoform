@@ -27,7 +27,8 @@ func TestRunDiff(t *testing.T) {
 	// Create test data
 	history := &historyv1alpha1.KronoformHistory{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-history",
+			Name:      "test-history",
+			Namespace: "default",
 		},
 		Spec: historyv1alpha1.KronoformHistorySpec{
 			Manifests:   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n  namespace: default\ndata:\n  key: new-value",
@@ -37,7 +38,8 @@ func TestRunDiff(t *testing.T) {
 
 	snapshot := &historyv1alpha1.KronoformSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-snapshot",
+			Name:      "test-snapshot",
+			Namespace: "default",
 		},
 		Spec: historyv1alpha1.KronoformSnapshotSpec{
 			Manifests: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n  namespace: default\ndata:\n  key: old-value",
@@ -52,12 +54,13 @@ func TestRunDiff(t *testing.T) {
 	g.Expect(err).To(gomega.BeNil())
 
 	// Test getHistory
-	retrievedHistory, err := getHistory(fakeClient, "test-history")
+	ctx := context.Background()
+	retrievedHistory, err := getHistory(ctx, fakeClient, "test-history", "default")
 	g.Expect(err).To(gomega.BeNil())
 	g.Expect(retrievedHistory.Spec.Manifests).To(gomega.Equal(history.Spec.Manifests))
 
 	// Test getSnapshot
-	retrievedSnapshot, err := getSnapshot(fakeClient, "test-snapshot")
+	retrievedSnapshot, err := getSnapshot(ctx, fakeClient, "test-snapshot", "default")
 	g.Expect(err).To(gomega.BeNil())
 	g.Expect(retrievedSnapshot.Spec.Manifests).To(gomega.Equal(snapshot.Spec.Manifests))
 
